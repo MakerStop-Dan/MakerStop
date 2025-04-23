@@ -1,4 +1,6 @@
 # MakerStop
+![MakerStop](img/MakerStop.jpg)
+
 
 **MakerStop** is an automatic length stop system designed for Makers, metal fabricators, carpenters, and weekend warriors who demand precision without paying commercial-level prices.
 
