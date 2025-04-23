@@ -27,3 +27,8 @@ I then worked on an MPCNC style carriage that used internally placed 15x5x5 Bear
 I then took the Elon approach and began to question weather bearings were even necessary. In short, for this application, they aren't. I opted for 16mm round aluminium tube for the linear rails. The carriage hugs the rails with very little friction and allows for the affordability and modularity set out in the Goals section above. 
 
 - **User Interface** It is tempting to build a mobile application to allow users to bring their own device but the decision was made to keep to the raspberry pi and touch screen interface to keep the user experience consistent and maintain a certain level of simplicity. 
+
+
+**Firmware** FLUIDNC is a robust cnc firmware for ESP32 base controllers and works perfectly for this application. No need to reinvent the wheel. 
+
+**Controller** Currently prototyping a custom controller design featuring ESP32 module and TB6600 stepper driver on the same board. It will also have a 5v rail to power the raspberry pi zero 2 and touch screen. Combining everything onto a single board will greatly reduce the space required in the touch screen enclosure, simplify the BOM and reduce the over all bom cost and assembly time. 
