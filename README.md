@@ -17,4 +17,12 @@ My goal is to make automation accessible—without the bloated cost or complexit
 - Low BOM cost
 - Built for mitre saws, cold saws, drop saws, etc.
 
+## 📄 License
+
+- 🧠 **Software (code/scripts)** — [Mozilla Public License 2.0](https://www.mozilla.org/en-US/MPL/2.0/)
+- 🛠️ **Design files (3D models, CAD, documentation)** — [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
+
+> Feel free to use, remix, and improve — just give credit.  
+> Commercial use of hardware designs is **not allowed** without permission.  
+> For licensing inquiries, reach out at info@makerstop.com.au
 
