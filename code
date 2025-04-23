@@ -1,0 +1,601 @@
+import subprocess
+import time
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QLineEdit, QTextEdit, QMessageBox, QWidget, QLabel, QFileDialog, QInputDialog, QDialog, QVBoxLayout, QDialogButtonBox, QHBoxLayout # type: ignore
+from PyQt5.QtGui import QFont
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QEvent, QPoint
+import sys
+import socket
+import re
+import json
+
+# Constants
+MAIN_FONT = QFont('Proxima Nova', 10)
+LARGE_FONT = QFont('Proxima Nova', 60)
+BUTTON_FONT = QFont('Proxima Nova', 20)
+NUMPAD_FONT = QFont('Proxima Nova', 28)
+TERMINAL_FONT = QFont('Consolas', 10)
+BUTTON_WIDTH = 90
+BUTTON_HEIGHT = 90
+BUTTON_SIZE_Y = 60
+BUTTON_SPACING = 5
+EXPANDED_BUTTON_SPACING = 7
+NUMPAD_START_X = 10
+NUMPAD_START_Y = 205
+PRESETS_FILE = "presets.json"  # File to store preset values
+
+class CNCController(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('MakerStop')
+        self.setGeometry(0, 0, 800 , 600)
+        self.start_pressed = False
+        self.connection_settings_visible = False
+        self.cut_list_settings_visible = False
+        self.cnc_socket = None
+        self.edit_mode = False
+        self.flashing = False
+        self.flash_timer = QTimer(self)
+        self.presets = self.load_presets()
+        
+        # Initialize cutList and currentIndex
+        self.cutList = []
+        self.currentIndex = -1
+
+        self.initUI()
+
+    def initUI(self):
+        self.initInputs()
+        self.initCutList()
+        self.initButtons()
+        self.initTerminal()
+        self.initHideButtons()
+        self.initPresetButtons()
+
+        self.load_last_address()
+        self.attempt_auto_connect()
+
+        self.toggle_cut_list_settings()
+
+    def initInputs(self):
+        self.measurement_input = self.createFocusLineEdit(10, 10, 380, 185, LARGE_FONT, "0.00mm")
+        self.measurement_input.focused.connect(lambda: self.set_current_input_target(self.measurement_input))
+
+        self.address_input = self.createFocusLineEdit(600, 90, 190, 40, MAIN_FONT, "Enter MakerStop-Control address (e.g., 192.168.1.100:8080)")
+        self.address_input.focused.connect(lambda: self.set_current_input_target(self.address_input))
+        self.address_input.setVisible(False)  # Hide by default
+        
+        self.current_input_target = self.measurement_input
+
+    def createFocusLineEdit(self, x, y, w, h, font, placeholder):
+        line_edit = FocusLineEdit(self)
+        line_edit.setGeometry(x, y, w, h)
+        line_edit.setFont(font)
+        line_edit.setPlaceholderText(placeholder)
+        return line_edit
+
+    def initCutList(self):
+        self.cutListDisplay = QTextEdit(self)
+        self.cutListDisplay.setGeometry(400, 10, 190, 185)
+        self.cutListDisplay.setReadOnly(False)
+        self.cutListDisplay.setFont(MAIN_FONT)
+        self.cutListDisplay.setPlaceholderText("Load Cut List Here.")
+        self.cutListDisplay.setVisible(True)  # Visible by Default
+
+        self.loadCutListButton = self.createButton('Load Cut List', 390, 203, self.openFileDialog)
+        self.prevButton = self.createButton('Previous Cut', 390, 250, self.prevCut)
+        self.nextButton = self.createButton('Next Cut', 495, 250, self.nextCut)
+        self.clearCutListButton = self.createButton('Clear Cut List', 495, 203, self.clearCutList)
+
+        self.loadCutListButton.setVisible(True)
+        self.prevButton.setVisible(True)
+        self.nextButton.setVisible(True)
+        self.clearCutListButton.setVisible(True)
+
+    def createButton(self, text, x, y, callback, w=100, h=45, font=MAIN_FONT):
+        button = QPushButton(text, self)
+        button.setGeometry(x, y, w, h)
+        button.setFont(font)
+        button.clicked.connect(callback)
+        return button
+
+    def initButtons(self):
+        self.connect_button = self.createButton('Connect', 600, 130, self.connect_to_cnc, 75, 40)
+        self.disconnect_button = self.createButton('Disconnect', 700, 130, self.disconnect_from_cnc, 75, 40)
+        self.disconnect_button.setEnabled(False)
+
+        self.connect_button.setVisible(False)  # Hide by default
+        self.disconnect_button.setVisible(False)  # Hide by default
+
+        self.homing_button = self.createButton('Home', 600, 260, self.homing_command, 190, 100, BUTTON_FONT)
+        self.homing_button.setEnabled(False)
+        self.homing_button.setStyleSheet("QPushButton { color: white; background-color: orange; }")
+
+        self.stop_button = self.createButton('Stop', 600, 370, self.stop_command, 190, 100, BUTTON_FONT)
+        self.stop_button.setEnabled(False)
+        self.stop_button.setStyleSheet("QPushButton { color: white; background-color: red; }")
+
+        self.start_button = self.createButton('Start', 600, 480, self.start_command, 190, 100, BUTTON_FONT)
+        self.start_button.setEnabled(True)
+
+# Apply the same style as the "=" button
+        self.start_button.setStyleSheet(f"""
+            background-color: #74b72e;  /* Standard blue color */
+            color: white;
+            border-radius: 10px;  /* Rounded corners */
+            font-size: {BUTTON_FONT.pointSize()}pt;  /* Explicit font size */
+        """)
+
+        self.stop_button.setStyleSheet(f"""
+            background-color: #ff746c;  /* Standard blue color */
+            color: white;
+            border-radius: 10px;  /* Rounded corners */
+            font-size: {BUTTON_FONT.pointSize()}pt;  /* Explicit font size */
+        """)
+
+        self.homing_button.setStyleSheet(f"""
+            background-color: #ffa500;  /* Standard blue color */
+            color: white;
+            border-radius: 10px;  /* Rounded corners */
+            font-size: {BUTTON_FONT.pointSize()}pt;  /* Explicit font size */
+        """)
+
+
+
+        self.buttons = [
+            ('7', (0, 0)), ('8', (0, 1)), ('9', (0, 2)), ('/', (0, 3)),
+            ('4', (1, 0)), ('5', (1, 1)), ('6', (1, 2)), ('*', (1, 3)),
+            ('1', (2, 0)), ('2', (2, 1)), ('3', (2, 2)), ('-', (2, 3)),
+            (':', (3, 0)), ('0', (3, 1)), ('.', (3, 2)), ('+', (3, 3)), 
+            ('C', (2, 4)), ('←', (1, 4)), ('=', (3, 4))
+        ]
+        self.button_objects = {}  # Store button objects for easier access
+        self.create_buttons()
+
+    def create_buttons(self):
+        for btn_text, pos in self.buttons:
+            button = QPushButton(btn_text, self)
+            button.setObjectName(btn_text)  # Set object name to find the button later
+            button_x = NUMPAD_START_X + (BUTTON_WIDTH + BUTTON_SPACING) * pos[1]
+            button_y = NUMPAD_START_Y + (BUTTON_HEIGHT + BUTTON_SPACING) * pos[0]
+            button.setGeometry(button_x, button_y, BUTTON_HEIGHT, BUTTON_WIDTH)
+
+                # Check if the button is "="
+            if btn_text == "=":
+                button.setGeometry(button_x, button_y, BUTTON_WIDTH * 2 + BUTTON_SPACING, BUTTON_HEIGHT)
+                button.setStyleSheet("""
+                    background-color: #24a0ed;
+                    color: white;
+                    border-radius: 10px;  /* Add rounded corners */
+                    font-size: {NUMPAD_FONT.pointSize()}pt; /* Explicit font size */
+                """)
+            else:
+                button.setGeometry(button_x, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
+                button.setStyleSheet("""
+                    background-color: darkgray;
+                    color: white;
+                    border-radius: 10px;  /* Add rounded corners */
+                    font-size: {NUMPAD_FONT.pointSize()}pt; /* Explicit font size */
+                """)
+
+
+            button.setFont(NUMPAD_FONT)
+            button.clicked.connect(lambda _, b=btn_text: self.on_calculator_button_clicked(b))
+            self.button_objects[btn_text] = button  # Store the button object
+
+    def initTerminal(self):
+        self.terminal_output = QTextEdit(self)
+        self.terminal_output.setReadOnly(True)
+        self.terminal_output.setGeometry(600, 185, 190, 60)
+        self.terminal_output.setFont(TERMINAL_FONT)
+        self.terminal_output.setVisible(False)  # Hide by default
+
+    def initHideButtons(self):
+        self.hide_connection_button = self.createButton('Show Connection Settings', 600, 10, self.toggle_connection_settings, 190, 40, MAIN_FONT)
+        
+        self.hide_cut_list_button = self.createButton('Show Cut List', 600, 50, self.toggle_cut_list_settings, 190, 40, MAIN_FONT)
+
+    def toggle_connection_settings(self):
+        self.connection_settings_visible = not self.connection_settings_visible
+        self.address_input.setVisible(self.connection_settings_visible)
+        self.connect_button.setVisible(self.connection_settings_visible)
+        self.disconnect_button.setVisible(self.connection_settings_visible)
+        self.terminal_output.setVisible(self.connection_settings_visible)
+
+        if self.connection_settings_visible:
+            self.hide_connection_button.setText('Hide Connection Settings')
+        else:
+            self.hide_connection_button.setText('Show Connection Settings')
+
+    def toggle_cut_list_settings(self):
+        self.cut_list_settings_visible = not self.cut_list_settings_visible
+        
+        # Set visibility of cut list related widgets
+        self.cutListDisplay.setVisible(self.cut_list_settings_visible)
+        self.loadCutListButton.setVisible(self.cut_list_settings_visible)
+        self.prevButton.setVisible(self.cut_list_settings_visible)
+        self.nextButton.setVisible(self.cut_list_settings_visible)
+        self.clearCutListButton.setVisible(self.cut_list_settings_visible)
+
+        # Toggle visibility of preset buttons based on cut list visibility
+        for button in self.preset_buttons:
+            button.setVisible(not self.cut_list_settings_visible)
+        
+        # Also toggle the Edit Preset button
+        self.edit_preset_button.setVisible(not self.cut_list_settings_visible)
+
+        # Adjust the text of the hide/show button
+        if self.cut_list_settings_visible:
+            self.hide_cut_list_button.setText('Presets')
+        else:
+            self.hide_cut_list_button.setText('Cut List')
+
+        # Update the UI to reflect changes
+        self.update()
+
+    def initPresetButtons(self):
+        self.preset_buttons = []
+        for i in range(5):
+            button = self.createButton(f'{self.presets.get(str(i), {}).get("name", f"Preset {i + 1}")}', 395, 10 + i * 50, lambda _, i=i: self.preset_button_action(i))
+            button.setVisible(False)  # Initially hidden
+            self.preset_buttons.append(button)
+
+        # Edit Preset button
+        self.edit_preset_button = self.createButton('Edit Preset', 498, 10, self.toggle_edit_mode)
+        self.edit_preset_button.setVisible(False)  # Initially hidden
+
+        # Timer for flashing effect
+        self.flash_timer.timeout.connect(self.toggle_flash)
+
+    def toggle_edit_mode(self):
+        self.edit_mode = not self.edit_mode
+        if self.edit_mode:
+            self.start_flashing()
+        else:
+            self.stop_flashing()
+            # Reset button styles back to normal
+            for button in self.preset_buttons:
+                button.setStyleSheet("")
+
+    def start_flashing(self):
+        self.flashing = True
+        self.flash_timer.start(500)  # Change color every 500ms
+
+    def stop_flashing(self):
+        self.flashing = False
+        self.flash_timer.stop()
+
+    def toggle_flash(self):
+        for button in self.preset_buttons:
+            if self.flashing:
+                if button.styleSheet():
+                    button.setStyleSheet("")  # Reset style to default
+                else:
+                    button.setStyleSheet("background-color: orange; color: black;")
+    
+    def preset_button_action(self, index):
+        if self.edit_mode:
+            # Open a dialog to get the new name and measurement
+            dialog = PresetEditDialog(self, self.presets.get(str(index), {"name": f"Preset {index + 1}", "value": ""}))
+            if dialog.exec_() == QDialog.Accepted:
+                preset_name, preset_value = dialog.get_preset_data()
+                if preset_value.isdigit() or self.is_float(preset_value):
+                    self.presets[str(index)] = {"name": preset_name, "value": preset_value}
+                    self.save_presets()
+                    self.preset_buttons[index].setText(preset_name)
+                    QMessageBox.information(self, 'Preset Saved', f'Preset {index + 1} updated to "{preset_name}" with value {preset_value}mm.')
+                else:
+                    QMessageBox.warning(self, "Invalid Input", "Please enter a valid number for the measurement.")
+            self.toggle_edit_mode()  # Exit edit mode after editing
+        else:
+            # Apply the preset value to the measurement input
+            if str(index) in self.presets:
+                self.measurement_input.setText(self.presets[str(index)]["value"])
+
+    def is_float(self, value):
+        try:
+            float(value)
+            return True
+        except ValueError:
+            return False
+
+    def save_presets(self):
+        with open(PRESETS_FILE, 'w') as file:
+            json.dump(self.presets, file)
+
+    def load_presets(self):
+        try:
+            with open(PRESETS_FILE, 'r') as file:
+                return json.load(file)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def on_calculator_button_clicked(self, value):
+        current_text = self.current_input_target.text()
+        if value == 'C':  # Clear the input field
+            self.current_input_target.clear()
+        elif value == '←':  # Delete the last character
+            self.current_input_target.setText(current_text[:-1])
+        elif value in {'+', '-', '*', '/'}:  # Handle operators
+            # Avoid appending multiple operators in a row
+            if current_text and current_text[-1] not in {'+', '-', '*', '/'}:
+                self.current_input_target.setText(current_text + value)
+        elif value == '=':  # Calculate the result
+            try:
+                # Safely evaluate the expression using eval (or use a math parser for more complex logic)
+                result = eval(current_text)
+                self.current_input_target.setText(str(result))
+            except Exception as e:
+                self.current_input_target.setText("Error")
+        else:  # Append numbers and decimal points
+            self.current_input_target.setText(current_text + value)
+
+
+    def openFileDialog(self):
+        filePath, _ = QFileDialog.getOpenFileName(self, "Open Cut List", "", "Text Files (*.txt);;All Files (*)")
+        if filePath:
+            self.loadCutList(filePath)
+
+    def loadCutList(self, filePath):
+        try:
+            with open(filePath, 'r') as file:
+                self.cutList = [line.strip() for line in file.readlines()]
+            self.currentIndex = -1
+            self.findNextCutWithNumber(initial=True)
+        except Exception as e:
+            self.append_to_terminal(f"Error loading cut list: {e}")
+
+    def findNextCutWithNumber(self, initial=False):
+        start_index = self.currentIndex + 1 if initial else self.currentIndex
+        for i in range(start_index, len(self.cutList)):
+            if re.search(r'\d+(\.\d+)?', self.cutList[i]):
+                self.currentIndex = i
+                self.displayCurrentCut()
+                return
+        if initial:
+            self.append_to_terminal("No valid cuts found in the list.")
+
+    def displayCurrentCut(self):
+        if 0 <= self.currentIndex < len(self.cutList):
+            currentCut = self.cutList[self.currentIndex]
+            match = re.search(r'\d+(\.\d+)?', currentCut)
+            if match:
+                measurement = match.group()
+                self.measurement_input.setText(measurement)
+            else:
+                self.measurement_input.setText("")
+        self.updateCutListDisplay()
+
+    def nextCut(self):
+        if self.currentIndex < len(self.cutList) - 1:
+            currentCut = self.cutList[self.currentIndex]
+            match = re.search(r': (\d+) cuts', currentCut)
+            if match:
+                quantity = int(match.group(1))
+                if quantity > 1:
+                    reply = QMessageBox.question(self, 'Confirm Cut Completion', f'Have all {quantity} cuts been made for this line?',
+                                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                    if reply == QMessageBox.No:
+                        return
+        self.currentIndex += 1
+        self.displayCurrentCut()
+        self.sendCurrentCutToController()
+
+    def prevCut(self):
+        if self.currentIndex > 0:
+            self.currentIndex -= 1
+            self.displayCurrentCut()
+            self.sendCurrentCutToController()
+
+    def updateCutListDisplay(self):
+        content = ""
+        for i, cut in enumerate(self.cutList):
+            if i == self.currentIndex:
+                content += f"<div style='background-color: orange;'>{cut}</div>"
+            else:
+                content += f"<div>{cut}</div>"
+        self.cutListDisplay.setHtml(content)
+        scroll_position = self.calculateScrollPosition(self.currentIndex, len(self.cutList))
+        self.cutListDisplay.verticalScrollBar().setValue(scroll_position)
+
+    def calculateScrollPosition(self, currentIndex, totalCuts):
+        positionPercentage = currentIndex / totalCuts if totalCuts else 0
+        maxScrollValue = self.cutListDisplay.verticalScrollBar().maximum()
+        scrollPosition = maxScrollValue * positionPercentage
+        return int(scrollPosition)
+
+    def sendCurrentCutToController(self):
+        if self.cnc_socket:
+            currentCut = self.cutList[self.currentIndex]
+            match = re.search(r'\d+(\.\d+)?', currentCut)
+            if match:
+                value = float(match.group())
+                if value > 2300:
+                    QMessageBox.warning(self, "Measurement Error", "The measurement exceeds the limit of 2300mm.")
+                    return
+            command = f"MOVE X{currentCut}\r\n"
+            try:
+                self.cnc_socket.sendall(command.encode('utf-8'))
+                self.append_to_terminal(f"Command sent: {command}")
+            except Exception as e:
+                self.append_to_terminal(f"Failed to send command: {e}")
+
+    def clearCutList(self):
+        reply = QMessageBox.question(self, 'Clear Cut List', 'Are you sure you want to clear the cut list?',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.cutList = []
+            self.currentIndex = -1
+            self.cutListDisplay.clear()
+            self.measurement_input.clear()
+            self.append_to_terminal("Cut list cleared.")
+
+    def homing_command(self):
+        reply = QMessageBox.question(self, 'Confirm Homing', 'Is the saw bed clear?', QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.send_command_to_cnc("$H\n")
+            self.append_to_terminal("Homing command sent.")
+
+    def stop_command(self):
+        self.send_command_to_cnc("M112\n")
+        self.append_to_terminal("Emergency stop command sent.")
+
+    def start_command(self):
+        # Check if there's a cut list loaded and the user has entered a manual measurement
+        if self.cutList and self.measurement_input.text() != "":
+            current_measurement = self.measurement_input.text()
+            current_cut_text = self.cutList[self.currentIndex] if 0 <= self.currentIndex < len(self.cutList) else None
+            
+            # Ensure we're not duplicating the same measurement
+            if current_cut_text and current_measurement != re.search(r'\d+(\.\d+)?', current_cut_text).group():
+                reply = QMessageBox.question(self, 'Return to Cut List Position',
+                                            'You have entered a manual measurement. Would you like to return to the current cut in the cut list?',
+                                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.displayCurrentCut()
+                    return
+        
+        measurement = self.measurement_input.text()
+        try:
+            value = float(measurement)
+            if value > 2300:
+                QMessageBox.warning(self, "Measurement Error", "The measurement exceeds the limit of 2300mm.")
+                return
+            gcode_command = f"G0 X{value}\n"
+            self.send_command_to_cnc(gcode_command)
+            self.append_to_terminal(f"Move command sent: {gcode_command}")
+        except ValueError:
+            self.append_to_terminal("Invalid measurement input")
+
+        self.start_pressed = True
+    
+
+    def send_command_to_cnc(self, command):
+        if self.cnc_socket:
+            try:
+                self.cnc_socket.sendall(command.encode('utf-8'))
+                self.append_to_terminal(f"Command sent: {command}")
+            except Exception as e:
+                self.append_to_terminal(f"Failed to send command: {e}")
+
+    def save_address(self, address):
+        with open('last_address.txt', 'w') as file:
+            file.write(address)
+
+    def load_last_address(self):
+        try:
+            with open('last_address.txt', 'r') as file:
+                address = file.read().strip()
+            self.address_input.setText(address)
+        except FileNotFoundError:
+            self.append_to_terminal("No previously saved address found.")
+
+    def set_current_input_target(self, target):
+        self.current_input_target = target
+
+    def append_to_terminal(self, message):
+        self.terminal_output.append(message)
+        self.terminal_output.verticalScrollBar().setValue(self.terminal_output.verticalScrollBar().maximum())
+
+    def connect_to_cnc(self):
+        address = self.address_input.text().split(':')
+        if len(address) != 2:
+            self.append_to_terminal("Error: Invalid address format. Use 'ip:port'.")
+            return
+
+        ip, port = address[0], int(address[1])
+        try:
+            self.cnc_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.cnc_socket.connect((ip, port))
+            self.append_to_terminal(f"Connected to CNC at {ip}:{port}")
+            self.homing_button.setEnabled(True)
+            self.stop_button.setEnabled(True)
+            self.start_button.setEnabled(True)
+            self.disconnect_button.setEnabled(True)
+            self.connect_button.setEnabled(False)
+            self.save_address(self.address_input.text())
+        except Exception as e:
+            self.append_to_terminal(f"Error connecting to MakerStop: {e}")
+
+    def disconnect_from_cnc(self):
+        if self.cnc_socket:
+            self.cnc_socket.close()
+            self.cnc_socket = None
+        self.connect_button.setEnabled(True)
+        self.disconnect_button.setEnabled(False)
+        self.homing_button.setEnabled(False)
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        self.append_to_terminal("Disconnected from MakerStop")
+
+    def attempt_auto_connect(self):
+        address = self.address_input.text()
+        if address:
+            address_parts = address.split(':')
+            if len(address_parts) == 2:
+                ip, port = address_parts[0], int(address_parts[1])
+                try:
+                    self.cnc_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.cnc_socket.connect((ip, port))
+                    self.append_to_terminal(f"Automatically connected to CNC at {ip}:{port}")
+                    self.homing_button.setEnabled(True)
+                    self.stop_button.setEnabled(True)
+                    self.start_button.setEnabled(True)
+                    self.disconnect_button.setEnabled(True)
+                    self.connect_button.setEnabled(False)
+                except Exception as e:
+                    self.append_to_terminal(f"Failed automatic connection to CNC: {e}")
+
+class FocusLineEdit(QLineEdit):
+    focused = pyqtSignal()
+
+    def focusInEvent(self, e):
+        super().focusInEvent(e)
+        self.focused.emit()
+
+class PresetEditDialog(QDialog):
+    def __init__(self, parent=None, preset=None):
+        super().__init__(parent)
+        self.setWindowTitle('Edit Preset')
+        self.setGeometry(100, 100, 300, 200)
+        self.layout = QVBoxLayout(self)
+
+        self.name_input = QLineEdit(self)
+        self.name_input.setPlaceholderText('Preset Name')
+        self.name_input.setText(preset.get("name", ""))
+        self.name_input.installEventFilter(self)
+        self.layout.addWidget(self.name_input)
+
+        self.value_input = QLineEdit(self)
+        self.value_input.setPlaceholderText('Measurement Value')
+        self.value_input.setText(preset.get("value", ""))
+        self.value_input.installEventFilter(self)
+        self.layout.addWidget(self.value_input)
+
+        self.buttonBox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+        self.layout.addWidget(self.buttonBox)
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.FocusIn:
+            if source in [self.name_input, self.value_input]:
+                try:
+                    print("Launching matchbox-keyboard...")
+                    subprocess.Popen(['/usr/bin/matchbox-keyboard', '--layout', 'full'])
+                except Exception as e:
+                    print(f"Failed to launch keyboard: {e}")
+        return super().eventFilter(source, event)
+
+    def closeEvent(self, event):
+        # Close the on-screen keyboard when the dialog is closed
+        subprocess.Popen(['pkill', 'matchbox-keyboard'])
+        super().closeEvent(event)
+
+    def get_preset_data(self):
+        return self.name_input.text(), self.value_input.text()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    main_window = CNCController()
+    main_window.show()
+    sys.exit(app.exec_())
