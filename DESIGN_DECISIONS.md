@@ -26,4 +26,4 @@ I then worked on an MPCNC style carriage that used internally placed 15x5x5 Bear
 
 I then took the Elon approach and began to question weather bearings were even necessary. In short, for this application, they aren't. I opted for 16mm round aluminium tube for the linear rails. The carriage hugs the rails with very little friction and allows for the affordability and modularity set out in the Goals section above. 
 
-
+- **User Interface** It is tempting to build a mobile application to allow users to bring their own device but the decision was made to keep to the raspberry pi and touch screen interface to keep the user experience consistent and maintain a certain level of simplicity. 
