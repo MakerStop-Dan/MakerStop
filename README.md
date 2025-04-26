@@ -1,6 +1,9 @@
 # MakerStop
 ![MakerStop](img/MakerStop.jpg)
 
+Kits will be made available to purchase from www.makerstop.com.au
+
+Contact - info@makerstop.com.au
 
 https://www.youtube.com/@MakerStop_au
 
