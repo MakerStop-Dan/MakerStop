@@ -2,7 +2,9 @@
 ![MakerStop](img/MakerStop.jpg)
 
 
-**MakerStop** is an automatic length stop system designed for Makers, metal fabricators, carpenters, and weekend warriors who demand precision without paying commercial-level prices.
+https://www.youtube.com/@MakerStop_au
+
+**MakerStop** is an automatic length stop system designed for Mitre saws, band saws and drill presses used by Makers, metal fabricators, carpenters, and weekend warriors who demand precision without paying commercial-level prices.
 
 Born out of necessity, MakerStop was developed in a small home garage where space, efficiency, and accuracy are the difference between thriving and burnout. As a full-time metal fabricator, I built this tool to meet the real-world demands of daily cutting tasks.
 
