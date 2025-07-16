@@ -1,13 +1,22 @@
-#Main Window 
+# Main Window 
+import re
+import sys
+import os
+
 from ui.dialogs.wifi_wizard import WiFiWizardDialog
 from PyQt5.QtGui import QIcon, QPixmap
 from ui.dialogs.calibration import CalibrationDialog
 from PyQt5.QtWidgets import (QMainWindow, QPushButton, QLineEdit, QTextEdit, QLabel, QMessageBox, QFileDialog, QDialog, QWidget)
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import QTimer, pyqtSignal, QSize, Qt
-import re
-import sys
-import os
+
+# Auto-updater import (add this)
+try:
+    from utils.auto_updater import AutoUpdater
+    AUTO_UPDATER_AVAILABLE = True
+except ImportError:
+    print("Auto-updater not available - continuing without it")
+    AUTO_UPDATER_AVAILABLE = False
 
 from config.constants import (APP_TITLE, APP_WIDTH, APP_HEIGHT, MAIN_FONT, 
                              LARGE_FONT, BUTTON_FONT, NUMPAD_FONT, TERMINAL_FONT,
@@ -16,10 +25,12 @@ from config.constants import (APP_TITLE, APP_WIDTH, APP_HEIGHT, MAIN_FONT,
                              MAX_MACHINE_DISTANCE, COLORS)
 from communication.bluetooth import BluetoothManager
 
-ASSETS_DIR  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 WIFI_ICON_PATH = os.path.join(ASSETS_DIR, "wifi.png")
 BLUETOOTH_ICON_PATH = os.path.join(ASSETS_DIR, "bluetooth.png")
 CALIBRATE_ICON_PATH = os.path.join(ASSETS_DIR, "calibrate.png")
+
+
 class FocusLineEdit(QLineEdit):
     """Custom QLineEdit that emits focused signal."""
     focused = pyqtSignal()
@@ -138,6 +149,9 @@ class MakerStopController(QMainWindow):
         self._init_ui()
         self._connect_signals()
         self._attempt_auto_connect()
+        
+        # Initialize auto-updater
+        self._init_auto_updater()
 
     def _init_window(self):
         """Initialize main window properties."""
@@ -161,6 +175,24 @@ class MakerStopController(QMainWindow):
         self.cutList = []
         self.currentIndex = -1
 
+    def _init_auto_updater(self):
+        """Initialize the auto-updater"""
+        try:
+            if AUTO_UPDATER_AVAILABLE:
+                print("Initializing auto-updater...")
+                self.auto_updater = AutoUpdater(self)
+                
+                # Check for updates on startup (after UI is fully loaded)
+                self.auto_updater.check_on_startup()
+            else:
+                self.auto_updater = None
+                print("Auto-updater not available")
+                
+        except Exception as e:
+            print(f"Failed to initialize auto-updater: {e}")
+            # Don't let updater failure crash the app
+            self.auto_updater = None
+
     def _init_ui(self):
         """Initialize all UI components."""
         self._create_input_fields()
@@ -171,8 +203,6 @@ class MakerStopController(QMainWindow):
         
         # Set initial visibility
         self._toggle_cut_list_settings()
-
-    
 
     def _create_input_fields(self):
         """Create measurement input field."""
@@ -193,13 +223,11 @@ class MakerStopController(QMainWindow):
             }
             """
         )
-
-        print(f"Applied stylesheet: {self.measurement_input.styleSheet()}")  # Debug line
         
         # Add "MakerStop" label at the top left
         self.makerstop_label = QLabel("MakerStop", self)
         self.makerstop_label.setStyleSheet("color: white; font-size: 28pt; font-weight: bold;")
-        self.makerstop_label.setGeometry(10, 5, 250, 40)  # Adjust position/size as needed
+        self.makerstop_label.setGeometry(10, 5, 250, 40)
 
         self.measurement_input.focused.connect(
             lambda: self.set_current_input_target(self.measurement_input)
@@ -207,7 +235,6 @@ class MakerStopController(QMainWindow):
 
         # Set default target
         self.set_current_input_target(self.measurement_input)
-    
 
     def _create_cut_list_panel(self):
         """Create cut list display and controls."""
@@ -340,11 +367,15 @@ class MakerStopController(QMainWindow):
         self.calibrate_button.setIcon(QIcon(CALIBRATE_ICON_PATH))
         self.calibrate_button.setIconSize(QSize(32, 32))
         self.calibrate_button.setStyleSheet("""
-            background-color: #303236;
+            background-color: #222428;
             color: white;
             border-radius: 10px;
-            font-size: 32pt;
-        }""")
+        }
+        QPushButton:pressed {
+            background-color: #d3d3d3;
+            color: black;
+        }
+        """)
 
         self.wifi_button = self._create_button(
             '', 750, 0, self.start_wifi_wizard, 40, 50, MAIN_FONT
@@ -355,12 +386,12 @@ class MakerStopController(QMainWindow):
             background-color: #222428;
             color: white;
             border-radius: 10px;
-}
-QPushButton:pressed {
-    background-color: #d3d3d3;
-    color: black;
-}
-""")
+        }
+        QPushButton:pressed {
+            background-color: #d3d3d3;
+            color: black;
+        }
+        """)
 
     def _create_numpad(self):
         """Create calculator numpad."""
@@ -383,7 +414,6 @@ QPushButton:pressed {
                     border-radius: 10px;
                     font-size: {NUMPAD_FONT.pointSize()}pt;
                     font-weight: bold;
-                
                 """)
             else:
                 button.setGeometry(button_x, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
@@ -413,34 +443,74 @@ QPushButton:pressed {
             background-color: #222428;
             color: white;
             border-radius: 10px;
-}
-QPushButton:pressed {
-    background-color: #d3d3d3;
-    color: black;
-}
-""")
+        }
+        QPushButton:pressed {
+            background-color: #d3d3d3;
+            color: black;
+        }
+        """)
 
-        self.wifi_button.setStyleSheet("""
-            background-color: #222428;
-            color: white;
-            border-radius: 10px;
-}
-QPushButton:pressed {
-    background-color: #d3d3d3;
-    color: black;
-}
-""")
+        # ADD THIS: Manual update check button with visual feedback
+        if AUTO_UPDATER_AVAILABLE:
+            self.update_button = self._create_button(
+                '🔄', 600, 0, self.manual_update_check, 40, 50, MAIN_FONT
+            )
+            self.update_button_default_style = """
+                background-color: #222428;
+                color: white;
+                border-radius: 10px;
+                font-size: 16pt;
+            }
+            QPushButton:pressed {
+                background-color: #d3d3d3;
+                color: black;
+            }
+            """
+            
+            self.update_button_checking_style = """
+                background-color: #ffa500;
+                color: white;
+                border-radius: 10px;
+                font-size: 16pt;
+            }
+            QPushButton:pressed {
+                background-color: #d3d3d3;
+                color: black;
+            }
+            """
+            
+            self.update_button.setStyleSheet(self.update_button_default_style)
+            self.update_button.setToolTip("Check for updates")
 
-        self.calibrate_button.setStyleSheet("""
-            background-color: #222428;
-            color: white;
-            border-radius: 10px;
-}
-QPushButton:pressed {
-    background-color: #d3d3d3;
-    color: black;
-}
-""")
+    def set_update_status(self, status):
+        """Set visual feedback for update checking status"""
+        if not hasattr(self, 'update_button'):
+            return
+            
+        if status == "checking":
+            # Change button appearance when checking
+            self.update_button.setText('⏳')
+            self.update_button.setStyleSheet(self.update_button_checking_style)
+            self.update_button.setEnabled(False)
+            self.update_button.setToolTip("Checking for updates...")
+            
+        elif status == "idle":
+            # Reset button to normal state
+            self.update_button.setText('🔄')
+            self.update_button.setStyleSheet(self.update_button_default_style)
+            self.update_button.setEnabled(True)
+            self.update_button.setToolTip("Check for updates")
+
+    def manual_update_check(self):
+        """Manually check for updates"""
+        try:
+            if hasattr(self, 'auto_updater') and self.auto_updater:
+                self.append_to_terminal("🔍 Manually checking for updates...")
+                self.auto_updater.check_for_updates(silent=False)
+            else:
+                self.append_to_terminal("❌ Auto-updater not available")
+        except Exception as e:
+            self.append_to_terminal(f"❌ Update check failed: {e}")
 
     def _connect_signals(self):
         """Connect signals between components."""
@@ -685,6 +755,7 @@ QPushButton:pressed {
 
     # === Dialog Methods ===
     def start_wifi_wizard(self):
+        """Open WiFi wizard dialog."""
         dialog = WiFiWizardDialog(self)
         result = dialog.exec_()
         if result == QDialog.Accepted:
@@ -696,14 +767,12 @@ QPushButton:pressed {
             self.append_to_terminal("Opening calibration wizard...")
             dialog = CalibrationDialog(self)
             result = dialog.exec_()
-            # Use 1 instead of QDialog.Accepted (since 1 is the value of Accepted)
-            if result == 1:  # QDialog.Accepted = 1
+            if result == QDialog.Accepted:
                 self.append_to_terminal("Calibration completed successfully!")
             else:
                 self.append_to_terminal("Calibration cancelled.")
         except Exception as e:
             self.append_to_terminal(f"Error opening calibration dialog: {e}")
-            # Remove the QMessageBox.critical here to avoid the error
             print(f"Calibration error: {e}")
 
     # === Utility Methods ===
@@ -722,15 +791,3 @@ QPushButton:pressed {
         
         self.bluetooth_manager.disconnect()
         event.accept()
-
-        self.setStyleSheet("""
-    QPushButton {
-        background-color: #303236;
-        color: white;
-        border-radius: 10px;
-    }
-    QPushButton:pressed {
-        background-color: #d3d3d3;  /* Light gray */
-        color: black;
-    }
-""")

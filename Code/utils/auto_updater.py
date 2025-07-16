@@ -15,8 +15,8 @@ from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 
 # Configuration
-GITHUB_REPO = "https://github.com/MakerStop-Dan/MakerStop/tree/main/Code"  # Replace with your repo
-CURRENT_VERSION = "0.9"  # Update this with each release
+GITHUB_REPO = "MakerStop-Dan/MakerStop"  # Replace with your repo
+CURRENT_VERSION = "v1.0.0"  # Update this with each release
 STARTUP_CHECK_DELAY = 3000  # 3 seconds after startup (in milliseconds)
 
 
