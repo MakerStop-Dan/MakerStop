@@ -1,6 +1,7 @@
 """
 GitHub Auto-Updater Module for MakerStop Controller
 Checks for updates and downloads new releases from GitHub
+Uses git tags for version detection instead of hardcoded versions
 """
 import requests
 import json
@@ -9,15 +10,128 @@ import sys
 import subprocess
 import zipfile
 import shutil
+import re
 from packaging import version
 from PyQt5.QtWidgets import QDialog, QLabel, QPushButton, QProgressBar, QTextEdit, QMessageBox
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 
 # Configuration
-GITHUB_REPO = "MakerStop-Dan/MakerStop"  # Replace with your repo
-CURRENT_VERSION = "v1.0.2"  # Update this with each release
+GITHUB_REPO = "MakerStop-Dan/MakerStop"
 STARTUP_CHECK_DELAY = 3000  # 3 seconds after startup (in milliseconds)
+
+
+def get_current_version():
+    """Get current version from git tags with fallbacks"""
+    try:
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Method 1: Try to get the latest git tag
+        try:
+            result = subprocess.run(
+                ['git', 'describe', '--tags', '--abbrev=0'], 
+                capture_output=True, 
+                text=True, 
+                cwd=script_dir,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                version_tag = result.stdout.strip()
+                # Remove 'v' prefix if present
+                clean_version = version_tag.lstrip('v')
+                print(f"Version from git tag: {clean_version}")
+                return clean_version
+        except Exception as e:
+            print(f"Git tag method failed: {e}")
+        
+        # Method 2: Try git describe with more info
+        try:
+            result = subprocess.run(
+                ['git', 'describe', '--tags', '--always'], 
+                capture_output=True, 
+                text=True, 
+                cwd=script_dir,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                describe_output = result.stdout.strip()
+                # Extract version number from describe output (e.g., "v1.0.3-5-g1234567")
+                match = re.match(r'v?(\d+\.\d+\.\d+)', describe_output)
+                if match:
+                    clean_version = match.group(1)
+                    print(f"Version from git describe: {clean_version}")
+                    return clean_version
+        except Exception as e:
+            print(f"Git describe method failed: {e}")
+        
+        # Method 3: Check for VERSION file
+        try:
+            version_file_paths = [
+                os.path.join(script_dir, '..', 'VERSION'),
+                os.path.join(script_dir, 'VERSION'),
+                os.path.join(os.getcwd(), 'VERSION')
+            ]
+            
+            for version_file in version_file_paths:
+                if os.path.exists(version_file):
+                    with open(version_file, 'r') as f:
+                        file_version = f.read().strip()
+                        clean_version = file_version.lstrip('v')
+                        print(f"Version from VERSION file: {clean_version}")
+                        return clean_version
+        except Exception as e:
+            print(f"VERSION file method failed: {e}")
+        
+        # Method 4: Try to get version from latest commit
+        try:
+            result = subprocess.run(
+                ['git', 'log', '--oneline', '-1'], 
+                capture_output=True, 
+                text=True, 
+                cwd=script_dir,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                commit_msg = result.stdout.strip()
+                # Look for version pattern in commit message
+                version_match = re.search(r'v?(\d+\.\d+\.\d+)', commit_msg)
+                if version_match:
+                    clean_version = version_match.group(1)
+                    print(f"Version from commit message: {clean_version}")
+                    return clean_version
+        except Exception as e:
+            print(f"Git commit method failed: {e}")
+            
+        # Final fallback
+        fallback_version = "1.0.0"
+        print(f"All version detection methods failed, using fallback: {fallback_version}")
+        return fallback_version
+        
+    except Exception as e:
+        print(f"Error in get_current_version: {e}")
+        return "1.0.0"
+
+
+def save_version_to_file(version):
+    """Save version to VERSION file for future reference"""
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        version_file = os.path.join(script_dir, '..', 'VERSION')
+        
+        with open(version_file, 'w') as f:
+            f.write(f"v{version}")
+        print(f"Saved version {version} to VERSION file")
+        
+    except Exception as e:
+        print(f"Failed to save version to file: {e}")
+
+
+# Get current version dynamically
+CURRENT_VERSION = get_current_version()
 
 
 class UpdateChecker(QThread):
@@ -39,11 +153,23 @@ class UpdateChecker(QThread):
             if response.status_code == 200:
                 release_data = response.json()
                 latest_version = release_data.get('tag_name', '').lstrip('v')
+                current_version = CURRENT_VERSION.lstrip('v')
                 
-                if version.parse(latest_version) > version.parse(CURRENT_VERSION):
-                    self.update_available.emit(release_data)
-                else:
-                    self.no_update.emit()
+                print(f"Current version: {current_version}")
+                print(f"Latest version: {latest_version}")
+                
+                try:
+                    if version.parse(latest_version) > version.parse(current_version):
+                        self.update_available.emit(release_data)
+                    else:
+                        self.no_update.emit()
+                except Exception as ve:
+                    print(f"Version comparison error: {ve}")
+                    # Fallback to string comparison
+                    if latest_version != current_version:
+                        self.update_available.emit(release_data)
+                    else:
+                        self.no_update.emit()
             else:
                 self.error_occurred.emit(f"GitHub API error: {response.status_code}")
                 
@@ -220,8 +346,11 @@ class UpdateDialog(QDialog):
     def install_update(self, zip_filepath):
         """Install the downloaded update"""
         try:
+            # Get the new version from release data
+            new_version = self.release_data.get('tag_name', 'unknown').lstrip('v')
+            
             # Create backup of current installation
-            backup_dir = "backup_" + CURRENT_VERSION
+            backup_dir = f"backup_v{CURRENT_VERSION}"
             if os.path.exists(backup_dir):
                 shutil.rmtree(backup_dir)
             
@@ -256,6 +385,9 @@ class UpdateDialog(QDialog):
                     else:
                         shutil.copy2(src_path, dst_path)
             
+            # Save the new version to VERSION file
+            save_version_to_file(new_version)
+            
             # Cleanup
             os.remove(zip_filepath)
             shutil.rmtree(temp_dir)
@@ -264,7 +396,7 @@ class UpdateDialog(QDialog):
             reply = QMessageBox.information(
                 self, 
                 "Update Complete", 
-                "Update installed successfully!\n\nThe application will restart now.",
+                f"Update to v{new_version} installed successfully!\n\nThe application will restart now.",
                 QMessageBox.Ok
             )
             
@@ -297,12 +429,10 @@ class UpdateDialog(QDialog):
     
     def remind_later(self):
         """Remind about update later"""
-        # Could implement a delayed reminder here
         self.reject()
     
     def skip_version(self):
         """Skip this version"""
-        # Could implement version skipping logic here
         self.reject()
     
     def reset_buttons(self):
@@ -323,7 +453,7 @@ class AutoUpdater:
     def check_on_startup(self):
         """Check for updates on application startup"""
         if not self.startup_check_completed:
-            print("Checking for updates on startup...")
+            print(f"Checking for updates on startup... Current version: {CURRENT_VERSION}")
             QTimer.singleShot(STARTUP_CHECK_DELAY, self.perform_startup_check)
     
     def perform_startup_check(self):
@@ -333,13 +463,13 @@ class AutoUpdater:
     
     def check_for_updates(self, silent=True):
         """Check for updates (silent=True for automatic checks)"""
-        print(f"Checking for updates... (silent: {silent})")
+        print(f"Checking for updates... Current version: {CURRENT_VERSION} (silent: {silent})")
         self.checker = UpdateChecker(GITHUB_REPO)
         self.checker.update_available.connect(lambda data: self.show_update_dialog(data))
         
         if not silent:
             self.checker.no_update.connect(lambda: QMessageBox.information(
-                self.parent_window, "No Updates", "You're running the latest version!"))
+                self.parent_window, "No Updates", f"You're running the latest version! (v{CURRENT_VERSION})"))
             self.checker.error_occurred.connect(lambda err: QMessageBox.warning(
                 self.parent_window, "Update Check Failed", f"Could not check for updates: {err}"))
         else:
@@ -350,43 +480,21 @@ class AutoUpdater:
     
     def show_update_dialog(self, release_data):
         """Show the update dialog"""
-        print(f"Update available: {release_data.get('tag_name', 'Unknown version')}")
+        new_version = release_data.get('tag_name', 'Unknown version')
+        print(f"Update available: {CURRENT_VERSION} -> {new_version}")
         dialog = UpdateDialog(release_data, self.parent_window)
         dialog.exec_()
 
 
-# Integration example for main_window.py
-def integrate_auto_updater(main_window_class):
-    """Example of how to integrate into your main window"""
-    
-    # Add to your MakerStopController.__init__ method:
-    def enhanced_init(self):
-        # ... existing initialization code ...
-        
-        # Initialize auto-updater
-        self.auto_updater = AutoUpdater(self)
-        
-        # Check for updates on startup (after UI is ready)
-        self.auto_updater.check_on_startup()
-        
-        # Optional: Add manual update check button to settings
-        self.manual_check_action = None  # Add this to a menu or button
-    
-    # Add this method to your main window class:
-    def manual_update_check(self):
-        """Manually check for updates"""
-        self.auto_updater.check_for_updates(silent=False)
+# Debug function to test version detection
+def debug_version_detection():
+    """Debug function to test all version detection methods"""
+    print("=== Version Detection Debug ===")
+    current_version = get_current_version()
+    print(f"Final detected version: {current_version}")
+    print("================================")
 
 
-# Usage in main.py
 if __name__ == '__main__':
-    import sys
-    from PyQt5.QtWidgets import QApplication
-    
-    app = QApplication(sys.argv)
-    
-    # Example of standalone usage for testing
-    updater = AutoUpdater(None)
-    updater.check_for_updates(silent=False)
-    
-    sys.exit(app.exec_())
+    # Test version detection
+    debug_version_detection()
