@@ -12,7 +12,7 @@ class WiFiWizardDialog(QDialog):
     
     A standalone module for connecting to WiFi networks with the following features:
     - Network scanning with multiple methods (nmcli, iwlist, iw)
-    - On-screen keyboard for touchscreen devices
+    - Enhanced on-screen keyboard with capitals and special characters
     - Manual network entry
     - Multiple connection methods
     - Current connection status display
@@ -32,6 +32,9 @@ class WiFiWizardDialog(QDialog):
             self.selected_network = None
             self.keyboard_visible = False
             self.current_input = None
+            self.shift_active = False  # Track shift state
+            self.caps_lock = False     # Track caps lock state
+            self.symbols_mode = False  # Track symbols mode
                 
             print("About to initialize WiFi UI elements...")
             self.init_wifi_ui_elements()
@@ -116,7 +119,7 @@ class WiFiWizardDialog(QDialog):
 
             # Keyboard toggle button
             self.keyboard_button = QPushButton("📱 Show Keyboard", self)
-            self.keyboard_button.setGeometry(580, 300, 130, 30)
+            self.keyboard_button.setGeometry(580, 300, 150, 30)
             self.keyboard_button.setFont(QFont('Proxima Nova', 10))
             self.keyboard_button.clicked.connect(self.toggle_keyboard)
             self.keyboard_button.setStyleSheet("""
@@ -190,109 +193,246 @@ class WiFiWizardDialog(QDialog):
         QLineEdit.focusInEvent(target_input, event)
 
     def create_onscreen_keyboard(self):
-        """Create an on-screen keyboard for touchscreen devices"""
+        """Create an enhanced on-screen keyboard with capitals and special characters"""
         try:
-            # Keyboard container (initially hidden) - moved up and made smaller
+            # Keyboard container (initially hidden)
             self.keyboard_widget = QWidget(self)
-            self.keyboard_widget.setGeometry(50, 420, 700, 180)  # Moved up from 520 to 420, reduced height
+            self.keyboard_widget.setGeometry(50, 300, 700, 180)
             self.keyboard_widget.setStyleSheet("background-color: #f0f0f0; border: 2px solid #ccc; border-radius: 10px;")
             self.keyboard_widget.setVisible(False)
 
-            # Keyboard layout
-            keyboard_layout = [
+            # Define keyboard layouts
+            self.letters_layout = [
                 ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '←'],
                 ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
                 ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-                ['z', 'x', 'c', 'v', 'b', 'n', 'm', '.', '@'],  # Simplified bottom row
-                ['Space', 'Done']  # Simplified control row
+                ['⇧', 'z', 'x', 'c', 'v', 'b', 'n', 'm', '⇧'],
+                ['123', 'Space', '⌘', 'Done']
+            ]
+            
+            self.symbols_layout = [
+                ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '←'],
+                ['-', '_', '=', '+', '[', ']', '{', '}', '\\', '|'],
+                [';', ':', "'", '"', ',', '.', '<', '>', '/', '?'],
+                ['~', '`', '', '', '', '', '', '', '~'],
+                ['ABC', 'Space', '⌘', 'Done']
             ]
 
             self.keyboard_buttons = []
-            button_width = 55  # Slightly smaller buttons
-            button_height = 30  # Smaller height
-            start_x = 10
-            start_y = 10
+            self.create_keyboard_layout()
 
-            for row_idx, row in enumerate(keyboard_layout):
-                for col_idx, key in enumerate(row):
-                    # Calculate position
-                    if row_idx == 4:  # Bottom row with Space and Done
-                        if key == 'Space':
-                            x = start_x + 50  # Center the space bar
-                            width = button_width * 4
-                        else:  # Done
-                            x = start_x + 50 + (button_width * 4) + 5
-                            width = button_width * 2
-                    else:
-                        x = start_x + col_idx * (button_width + 2)
-                        width = button_width
-                        if key == '←':
-                            width = button_width + 15  # Slightly wider backspace
-                    
-                    y = start_y + row_idx * (button_height + 3)
-
-                    # Create button
-                    button = QPushButton(key, self.keyboard_widget)
-                    button.setGeometry(x, y, width, button_height)
-                    button.setFont(QFont('Proxima Nova', 9))  # Smaller font
-                        
-                    if key in ['Done', '←', 'Space']:
-                        button.setStyleSheet("""
-                            background-color: #666;
-                            color: white;
-                            border-radius: 5px;
-                            font-weight: bold;
-                        """)
-                    else:
-                        button.setStyleSheet("""
-                            background-color: white;
-                            border: 1px solid #ccc;
-                            border-radius: 5px;
-                        """)
-                        
-                    # Connect button to handler
-                    button.clicked.connect(partial(self.keyboard_key_pressed, key))
-                    self.keyboard_buttons.append(button)
-
-            print(f"Created {len(self.keyboard_buttons)} keyboard buttons")
+            print(f"Created enhanced keyboard with {len(self.keyboard_buttons)} buttons")
 
         except Exception as e:
             print(f"Error creating keyboard: {e}")
             import traceback
             traceback.print_exc()
 
+    def create_keyboard_layout(self):
+        """Create the keyboard layout based on current mode"""
+        # Clear existing buttons
+        for button in self.keyboard_buttons:
+            button.deleteLater()
+        self.keyboard_buttons = []
+        
+        # Force process pending deletions
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        # Choose layout based on mode
+        layout = self.symbols_layout if self.symbols_mode else self.letters_layout
+        
+        button_width = 55
+        button_height = 30
+        start_x = 10
+        start_y = 10
+
+        for row_idx, row in enumerate(layout):
+            for col_idx, key in enumerate(row):
+                if not key:  # Skip empty keys
+                    continue
+                    
+                # Calculate position
+                if row_idx == 4:  # Bottom row with special keys
+                    if key == 'Space':
+                        x = start_x + 50
+                        width = button_width * 4
+                    elif key in ['123', 'ABC']:
+                        x = start_x
+                        width = button_width
+                    elif key == '⌘':  # Caps lock
+                        x = start_x + 50 + (button_width * 4) + 5
+                        width = button_width
+                    else:  # Done
+                        x = start_x + 50 + (button_width * 5) + 10
+                        width = button_width * 2
+                elif row_idx == 3 and key == '⇧':  # Shift keys
+                    if col_idx == 0:  # Left shift
+                        x = start_x
+                        width = button_width
+                    else:  # Right shift
+                        x = start_x + (len(row) - 1) * (button_width + 2)
+                        width = button_width
+                else:
+                    x = start_x + col_idx * (button_width + 2)
+                    width = button_width
+                    if key == '←':
+                        width = button_width + 15
+                
+                y = start_y + row_idx * (button_height + 3)
+
+                # Create button
+                button = QPushButton(self.get_display_key(key), self.keyboard_widget)
+                button.setGeometry(x, y, width, button_height)
+                button.setFont(QFont('Proxima Nova', 9))
+                
+                # Style special keys differently
+                if key in ['Done', '←', 'Space', '⇧', '123', 'ABC', '⌘']:
+                    if key == '⇧' and (self.shift_active or self.caps_lock):
+                        # Highlight active shift/caps
+                        button.setStyleSheet("""
+                            background-color: #4a90e2;
+                            color: white;
+                            border-radius: 5px;
+                            font-weight: bold;
+                        """)
+                    elif key == '⌘' and self.caps_lock:
+                        # Highlight caps lock
+                        button.setStyleSheet("""
+                            background-color: #e74c3c;
+                            color: white;
+                            border-radius: 5px;
+                            font-weight: bold;
+                        """)
+                    else:
+                        button.setStyleSheet("""
+                            background-color: #666;
+                            color: white;
+                            border-radius: 5px;
+                            font-weight: bold;
+                        """)
+                else:
+                    button.setStyleSheet("""
+                        background-color: white;
+                        border: 1px solid #ccc;
+                        border-radius: 5px;
+                    """)
+                
+                # Connect button to handler
+                button.clicked.connect(partial(self.keyboard_key_pressed, key))
+                self.keyboard_buttons.append(button)
+                
+                # Ensure button is visible if keyboard is visible
+                if self.keyboard_visible:
+                    button.show()
+
+    def get_display_key(self, key):
+        """Get the display text for a key based on current state"""
+        if key == '⌘':
+            return 'CAPS' if self.caps_lock else 'caps'
+        elif key == '123':
+            return '123'
+        elif key == 'ABC':
+            return 'ABC'
+        elif key == '⇧':
+            return '⇧'
+        elif key in ['←', 'Space', 'Done']:
+            return key
+        elif not self.symbols_mode and key.isalpha():
+            if self.caps_lock or self.shift_active:
+                return key.upper()
+            else:
+                return key.lower()
+        else:
+            return key
+
     def keyboard_key_pressed(self, key):
-        """Handle on-screen keyboard key press"""
+        """Handle enhanced keyboard key press"""
         try:
             if not self.current_input:
                 return
 
             current_text = self.current_input.text()
 
-            if key == '←' :  # Backspace
+            if key == '←':  # Backspace
                 self.current_input.setText(current_text[:-1])
+                
             elif key == 'Space':
                 self.current_input.setText(current_text + ' ')
+                
             elif key == 'Done':
                 self.toggle_keyboard()
-            elif key == '⇧':  # Shift - toggle case
-                # Toggle case for next character (simple implementation)
-                pass
-            elif key == '123':  # Numbers mode
-                # Could implement number/symbol mode
-                pass
-            else:
-                self.current_input.setText(current_text + key)
+                
+            elif key == '⇧':  # Shift
+                if self.caps_lock:
+                    # If caps lock is on, shift toggles it off
+                    self.caps_lock = False
+                    self.shift_active = False
+                else:
+                    # Toggle shift
+                    self.shift_active = not self.shift_active
+                # Update keyboard layout while preserving visibility
+                self.update_keyboard_layout()
+                
+            elif key == '⌘':  # Caps Lock
+                self.caps_lock = not self.caps_lock
+                self.shift_active = False  # Reset shift when caps lock changes
+                # Update keyboard layout while preserving visibility
+                self.update_keyboard_layout()
+                
+            elif key == '123':  # Switch to symbols
+                self.symbols_mode = True
+                # Update keyboard layout while preserving visibility
+                self.update_keyboard_layout()
+                
+            elif key == 'ABC':  # Switch to letters
+                self.symbols_mode = False
+                # Update keyboard layout while preserving visibility
+                self.update_keyboard_layout()
+                
+            else:  # Regular character
+                char_to_add = key
+                
+                # Apply case transformation for letters
+                if not self.symbols_mode and key.isalpha():
+                    if self.caps_lock or self.shift_active:
+                        char_to_add = key.upper()
+                    else:
+                        char_to_add = key.lower()
+                
+                self.current_input.setText(current_text + char_to_add)
+                
+                # Reset shift after character (but not caps lock)
+                if self.shift_active and not self.caps_lock:
+                    self.shift_active = False
+                    # Update keyboard layout while preserving visibility
+                    self.update_keyboard_layout()
 
         except Exception as e:
             print(f"Error in keyboard_key_pressed: {e}")
+
+    def update_keyboard_layout(self):
+        """Update keyboard layout while preserving visibility state"""
+        try:
+            # Store current visibility state
+            was_visible = self.keyboard_visible and self.keyboard_widget.isVisible()
+            
+            # Recreate the layout
+            self.create_keyboard_layout()
+            
+            # Restore visibility if it was visible before
+            if was_visible:
+                self.keyboard_widget.setVisible(True)
+                self.keyboard_widget.show()
+                
+        except Exception as e:
+            print(f"Error in update_keyboard_layout: {e}")
 
     def toggle_keyboard(self):
         """Toggle on-screen keyboard visibility"""
         try:
             print(f"Toggle keyboard called, current visibility: {getattr(self, 'keyboard_visible', False)}")
             
-            # Initialize keyboard_visible if it doesn't exist
             if not hasattr(self, 'keyboard_visible'):
                 self.keyboard_visible = False
             
@@ -308,17 +448,16 @@ class WiFiWizardDialog(QDialog):
                 
             if self.keyboard_visible:
                 self.keyboard_button.setText("📱 Hide Keyboard")
-                # Resize dialog to accommodate keyboard - increase height more
-                self.setFixedSize(800, 620)  # Only slightly bigger since keyboard moved up
+                self.setFixedSize(800, 620)
                 print("Dialog resized to 800x620")
                 
                 # Move other elements up to make room
-                self.current_connection_label.setGeometry(50, 360, 700, 25)  # Moved up
-                self.current_connection_info.setGeometry(50, 385, 700, 30)   # Moved up and made smaller
+                self.current_connection_label.setGeometry(50, 360, 700, 25)
+                self.current_connection_info.setGeometry(50, 385, 700, 30)
                 
                 # Set current input focus
                 if not self.current_input:
-                    self.current_input = self.network_name_input  # Default
+                    self.current_input = self.network_name_input
                     print("Set default current_input to network_name_input")
             else:
                 self.keyboard_button.setText("📱 Show Keyboard")
@@ -458,7 +597,7 @@ class WiFiWizardDialog(QDialog):
             self.refresh_button.setEnabled(True)
 
     def parse_wifi_networks(self, nmcli_output):
-        """Parse nmcli output and display networks - Fixed to show only SSID"""
+        """Parse nmcli output and display networks"""
         try:
             lines = nmcli_output.strip().split('\n')
             if len(lines) < 2:
@@ -468,18 +607,8 @@ class WiFiWizardDialog(QDialog):
             networks_html = "<h3>Available Networks:</h3>"
             self.available_networks = []
             
-            # Debug: print the raw output to understand format
-            print("Raw nmcli output:")
-            for i, line in enumerate(lines[:5]):  # Print first 5 lines for debugging
-                print(f"Line {i}: '{line}'")
-                
             for line in lines[1:]:  # Skip header
                 if not line.strip():
-                    continue
-                    
-                # Handle the actual nmcli output format: [*] BSSID SSID MODE CHAN RATE SIGNAL BARS SECURITY
-                parts = line.split()
-                if len(parts) < 3:
                     continue
                     
                 try:
@@ -487,45 +616,29 @@ class WiFiWizardDialog(QDialog):
                     is_connected = line.strip().startswith('*')
                     
                     if is_connected:
-                        # Remove the * and parse the rest
                         line_without_star = line[1:].strip()
                         parts = line_without_star.split()
                     else:
                         parts = line.split()
                     
-                    if len(parts) < 8:  # Need at least BSSID SSID MODE CHAN RATE SIGNAL BARS SECURITY
+                    if len(parts) < 8:
                         continue
                     
-                    # Extract components:
-                    # parts[0] = BSSID (MAC address) - skip this
-                    # parts[1] = SSID (what we want)
-                    # parts[2] = MODE
-                    # parts[3] = CHAN
-                    # parts[4] = RATE  
-                    # parts[5] = SIGNAL
-                    # parts[6] = BARS
-                    # parts[7] = SECURITY
-                    
-                    ssid = parts[1]  # This should be the SSID
+                    ssid = parts[1]
                     signal = parts[5] if len(parts) > 5 else 'Unknown'
                     security = parts[7] if len(parts) > 7 else 'Unknown'
                     
-                    # Clean up SSID
                     ssid = ssid.strip()
                     if not ssid or ssid == '--' or ssid == 'SSID':
                         continue
                     
-                    # Skip hidden networks
                     if ssid.startswith('<') and ssid.endswith('>'):
                         continue
                     
                     if is_connected:
-                        networks_html += f"<p><b>🟢 {ssid}</b> (Connected)<br/>Signal: {signal}, Security: {security}</p>"
-                        networks_html += f"<hr/>"
+                        networks_html += f"<p><b>🟢 {ssid}</b> (Connected)<br/>Signal: {signal}, Security: {security}</p><hr/>"
                     else:
-                        networks_html += f"<p><b>{ssid}</b><br/>Signal: {signal}, Security: {security}</p>"
-                        networks_html += f"<hr/>"
-                        
+                        networks_html += f"<p><b>{ssid}</b><br/>Signal: {signal}, Security: {security}</p><hr/>"
                         self.available_networks.append({
                             'ssid': ssid,
                             'signal': signal,
@@ -538,14 +651,7 @@ class WiFiWizardDialog(QDialog):
 
             self.networks_list.setHtml(networks_html)
             self.status_label.setText(f"Found {len(self.available_networks)} networks. Click a network name to select it.")
-
-            # Add click handler for network selection
             self.networks_list.mousePressEvent = self.network_clicked
-            
-            # Debug: print parsed networks
-            print(f"Parsed {len(self.available_networks)} networks:")
-            for net in self.available_networks:
-                print(f"  SSID: '{net['ssid']}'")
 
         except Exception as e:
             print(f"Error parsing networks: {e}")
@@ -558,7 +664,6 @@ class WiFiWizardDialog(QDialog):
             cursor.select(cursor.WordUnderCursor)
             selected_text = cursor.selectedText()
                 
-            # Find matching network
             for network in self.available_networks:
                 if network['ssid'] in selected_text or selected_text in network['ssid']:
                     self.network_name_input.setText(network['ssid'])
@@ -579,7 +684,6 @@ class WiFiWizardDialog(QDialog):
                 wifi_connections = [line for line in lines if 'wifi' in line.lower()]
                     
                 if wifi_connections:
-                    # Parse the active connection
                     connection_info = wifi_connections[0].split()
                     if len(connection_info) >= 1:
                         network_name = connection_info[0]
@@ -612,7 +716,6 @@ class WiFiWizardDialog(QDialog):
                         current_network['ssid'] = essid
                 
                 elif 'Quality=' in line and 'Signal level=' in line:
-                    # Extract signal quality
                     parts = line.split()
                     for part in parts:
                         if 'Quality=' in part:
@@ -627,7 +730,6 @@ class WiFiWizardDialog(QDialog):
                         current_network['security'] = 'Secured'
                 
                 elif line.startswith('Cell ') and current_network.get('ssid'):
-                    # Save previous network and start new one
                     self.available_networks.append(current_network.copy())
                     networks_html += f"<p><b>{current_network['ssid']}</b><br/>"
                     networks_html += f"Signal: {current_network.get('signal', 'Unknown')}, "
@@ -820,8 +922,8 @@ network={{
             self.connect_button.setEnabled(True)
             self.connect_button.setText("Connect to WiFi")
 
-
     def showEvent(self, event):
+        """Start network scan when dialog is shown"""
         super().showEvent(event)
         QTimer.singleShot(0, self.scan_wifi_networks)
 
@@ -843,49 +945,3 @@ if __name__ == '__main__':
         print("WiFi wizard was cancelled")
 
     sys.exit()
-
-    def parse_iw_networks(self, iw_output):
-        """Parse iw scan output"""
-        try:
-            networks_html = "<h3>Available Networks (iw):</h3>"
-            self.available_networks = []
-
-            current_network = {}
-
-            for line in iw_output.split('\n'):
-                line = line.strip()
-
-                if line.startswith('BSS '):
-                    # New network entry
-                    if current_network.get('ssid'):
-                        self.available_networks.append(current_network.copy())
-                        networks_html += f"<p><b>{current_network['ssid']}</b><br/>"
-                        networks_html += f"Signal: {current_network.get('signal', 'Unknown')}, "
-                        networks_html += f"Security: {current_network.get('security', 'Unknown')}</p><hr/>"
-                    current_network = {}
-
-                elif line.startswith('SSID: '):
-                    ssid = line.split('SSID: ')[1].strip()
-                    if ssid:
-                        current_network['ssid'] = ssid
-
-                elif 'signal:' in line:
-                    signal = line.split('signal:')[1].strip().split()[0]
-                    current_network['signal'] = signal
-
-                elif 'Privacy' in line or 'RSN:' in line or 'WPA:' in line:
-                    current_network['security'] = 'Secured'
-
-            # Don't forget the last network
-            if current_network.get('ssid'):
-                self.available_networks.append(current_network)
-                networks_html += f"<p><b>{current_network['ssid']}</b><br/>"
-                networks_html += f"Signal: {current_network.get('signal', 'Unknown')}, "
-                networks_html += f"Security: {current_network.get('security', 'Unknown')}</p><hr/>"
-
-            self.networks_list.setHtml(networks_html)
-            self.status_label.setText(f"Found {len(self.available_networks)} networks (iw). Click a network to select.")
-            self.networks_list.mousePressEvent = self.network_clicked
-
-        except Exception as e:
-            print(f"Error parsing iw output: {e}")

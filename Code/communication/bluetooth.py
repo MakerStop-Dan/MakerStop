@@ -2,7 +2,30 @@
 Bluetooth communication module for MakerStop Controller.
 Handles all Bluetooth connectivity and command transmission.
 """
-import bluetooth
+# At the top of your communication/bluetooth.py file, replace:
+# import bluetooth
+
+# With this:
+# try:
+#     import bluetooth
+# except ImportError:
+#     print("Creating mock bluetooth for development...")
+#     class MockBluetooth:
+#         RFCOMM = "RFCOMM"
+#         class BluetoothSocket:
+#             def __init__(self, protocol): pass
+#             def connect(self, addr): print(f"Mock connect: {addr}")
+#             def send(self, data): print(f"Mock send: {data.decode('utf-8', errors='ignore').strip()}"); return len(data)
+#             def recv(self, size): return b""
+#             def settimeout(self, timeout): pass
+#             def close(self): pass
+#         @staticmethod
+#         def discover_devices(duration=10, lookup_names=True):
+#             mock_devices = [("00:11:22:33:44:55", "Mock FluidNC")]
+#             return mock_devices if lookup_names else [addr for addr, name in mock_devices]
+    
+#     bluetooth = MockBluetooth()
+import bluetooth    
 import threading
 import socket
 import time

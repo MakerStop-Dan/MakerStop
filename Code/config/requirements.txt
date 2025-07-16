@@ -1,0 +1,5 @@
+# Minimal MakerStop Controller Requirements
+PyQt5>=5.15.0
+pybluez>=0.23
+requests>=2.25.0
+packaging>=21.0
