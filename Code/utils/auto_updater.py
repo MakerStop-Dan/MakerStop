@@ -225,7 +225,7 @@ class UpdateDialog(QDialog):
     def init_ui(self):
         """Initialize update dialog UI"""
         self.setWindowTitle("MakerStop Update Available")
-        self.setFixedSize(500, 500)
+        self.setFixedSize(600, 500)
         
         # Release info
         version_text = self.release_data.get('tag_name', 'Unknown')
