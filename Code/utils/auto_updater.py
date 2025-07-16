@@ -18,7 +18,7 @@ from PyQt5.QtGui import QFont
 
 # Configuration
 
-GITHUB_REPO = "MakerStop-Dan/MakerStop"  # Replace with your repo
+GITHUB_REPO = "MakerStop-Dan/MakerStop"
 STARTUP_CHECK_DELAY = 3000  # 3 seconds after startup (in milliseconds)
 
 
