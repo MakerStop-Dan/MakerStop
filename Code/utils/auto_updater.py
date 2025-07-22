@@ -194,19 +194,47 @@ class UpdateDownloader(QThread):
     def run(self):
         """Download the update file"""
         try:
+            # First try to get file size with HEAD request
+            total_size = 0
+            try:
+                head_response = requests.head(self.download_url, timeout=10)
+                total_size = int(head_response.headers.get('content-length', 0))
+            except:
+                pass
+            
+            # Start actual download
             response = requests.get(self.download_url, stream=True, timeout=30)
-            total_size = int(response.headers.get('content-length', 0))
+            
+            # If HEAD failed, try to get size from download response
+            if total_size == 0:
+                total_size = int(response.headers.get('content-length', 0))
+            
             downloaded = 0
+            last_progress = -1
             
             with open(self.filename, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         file.write(chunk)
                         downloaded += len(chunk)
+                        
                         if total_size > 0:
+                            # Normal progress calculation
                             progress = int((downloaded / total_size) * 100)
-                            self.progress_update.emit(progress)
+                            # Only update if progress actually changed
+                            if progress != last_progress and progress <= 100:
+                                self.progress_update.emit(progress)
+                                last_progress = progress
+                        else:
+                            # Fallback: fake progress for unknown size
+                            # Create a slower incrementing progress that never reaches 100
+                            fake_progress = min(int((downloaded / (1024 * 1024)) * 10), 90)  # 10% per MB, max 90%
+                            if fake_progress != last_progress:
+                                self.progress_update.emit(fake_progress)
+                                last_progress = fake_progress
             
+            # Always emit 100% when complete
+            self.progress_update.emit(100)
             self.download_complete.emit(self.filename)
             
         except Exception as e:

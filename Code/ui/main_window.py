@@ -29,6 +29,8 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 WIFI_ICON_PATH = os.path.join(ASSETS_DIR, "wifi.png")
 BLUETOOTH_ICON_PATH = os.path.join(ASSETS_DIR, "bluetooth.png")
 CALIBRATE_ICON_PATH = os.path.join(ASSETS_DIR, "calibrate.png")
+UPDATE_ICON_PATH = os.path.join(ASSETS_DIR, "update.png")
+
 
 
 class FocusLineEdit(QLineEdit):
@@ -453,8 +455,10 @@ class MakerStopController(QMainWindow):
         # ADD THIS: Manual update check button with visual feedback
         if AUTO_UPDATER_AVAILABLE:
             self.update_button = self._create_button(
-                '🔄', 600, 0, self.manual_update_check, 40, 50, MAIN_FONT
+                '', 595, 0, self.manual_update_check, 40, 50, MAIN_FONT
             )
+            self.update_button.setIcon(QIcon(UPDATE_ICON_PATH))  # <-- Add this line
+            self.update_button.setIconSize(QSize(32, 32))        # <-- Add this line
             self.update_button_default_style = """
                 background-color: #222428;
                 color: white;
@@ -638,8 +642,11 @@ class MakerStopController(QMainWindow):
     # === Cut List Methods ===
     def openFileDialog(self):
         """Open file dialog to load cut list."""
+        # Set the default directory where your cut lists are stored
+        default_dir = "/home/momentum/Code/cutlists"  # Replace with your actual path
+        
         filePath, _ = QFileDialog.getOpenFileName(
-            self, "Open Cut List", "", "Text Files (*.txt);;All Files (*)"
+            self, "Open Cut List", default_dir, "Text Files (*.txt);;All Files (*)"
         )
         if filePath:
             self.loadCutList(filePath)
