@@ -643,7 +643,7 @@ class MakerStopController(QMainWindow):
     def openFileDialog(self):
         """Open file dialog to load cut list."""
         # Set the default directory where your cut lists are stored
-        default_dir = "/home/momentum/Code/cutlists"  # Replace with your actual path
+        default_dir = "/home/makerstop/Code/cutlists"  # Replace with your actual path
         
         filePath, _ = QFileDialog.getOpenFileName(
             self, "Open Cut List", default_dir, "Text Files (*.txt);;All Files (*)"

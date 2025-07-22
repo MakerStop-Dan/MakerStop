@@ -199,6 +199,21 @@
             background: #7f8c8d;
         }
 
+        .btn-warning {
+            background: #f39c12;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #e67e22;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 14px;
+            margin-right: 5px;
+        }
+
         .status-message {
             padding: 15px;
             border-radius: 6px;
@@ -216,6 +231,12 @@
             background: #f8d7da;
             color: #721c24;
             border: 1px solid #f5c6cb;
+        }
+
+        .status-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
         }
 
         .cutlist-item {
@@ -251,6 +272,21 @@
             margin-top: 10px;
         }
 
+        .edit-indicator {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
         @media (max-width: 768px) {
             .cut-item {
                 grid-template-columns: 1fr;
@@ -268,6 +304,10 @@
             .main-content {
                 padding: 15px;
             }
+
+            .button-group {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -281,13 +321,15 @@
 
         <div class="main-content">
             <div class="tabs">
-                <button class="tab active" onclick="showTab('create')">Create Cutlist</button>
-                <button class="tab" onclick="showTab('view')">View Saved</button>
-                <button class="tab" onclick="showTab('status')">Status</button>
+                <button class="tab active" id="create-tab-btn" onclick="showTab('create')">Create Cutlist</button>
+                <button class="tab" id="view-tab-btn" onclick="showTab('view')">View Saved</button>
+                <button class="tab" id="status-tab-btn" onclick="showTab('status')">Status</button>
             </div>
 
             <!-- Create Cutlist Tab -->
             <div id="create-tab" class="tab-content active">
+                <div id="edit-indicator" style="display: none;"></div>
+                
                 <form id="cutlist-form">
                     <div class="form-group">
                         <label for="project-name">Project Name</label>
@@ -305,7 +347,7 @@
                             <div class="cut-item">
                                 <input type="text" placeholder="Description" name="description" required>
                                 <input type="number" placeholder="Length" name="length" step="0.01" required>
-                                <input type="number" placeholder="Qty" name="quantity" min="1" required>
+                                <input type="number" placeholder="Qty" name="quantity" min="1" value="1" required>
                                 <input type="text" placeholder="Material" name="material" required>
                                 <button type="button" class="btn btn-danger" onclick="removeCut(this)">Remove</button>
                             </div>
@@ -314,7 +356,10 @@
                         <button type="button" class="btn btn-secondary" onclick="addCut()">Add Another Cut</button>
                     </div>
 
-                    <button type="submit" class="btn btn-primary">Send Cutlist</button>
+                    <div class="button-group">
+                        <button type="button" id="cancel-btn" class="btn btn-secondary" onclick="exitEditMode()" style="display: none;">Cancel Edit</button>
+                        <button type="submit" id="submit-btn" class="btn btn-primary">Send Cutlist</button>
+                    </div>
                 </form>
 
                 <div id="status-message"></div>
@@ -339,6 +384,9 @@
     </div>
 
     <script>
+        // Global variables for edit mode
+        let currentEditingTxtFile = null;
+
         // Tab switching
         function showTab(tabName) {
             // Hide all tabs
@@ -351,7 +399,7 @@
 
             // Show selected tab
             document.getElementById(tabName + '-tab').classList.add('active');
-            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab-btn').classList.add('active');
         }
 
         // Add new cut row
@@ -362,7 +410,7 @@
             newCut.innerHTML = `
                 <input type="text" placeholder="Description" name="description" required>
                 <input type="number" placeholder="Length" name="length" step="0.01" required>
-                <input type="number" placeholder="Qty" name="quantity" min="1" required>
+                <input type="number" placeholder="Qty" name="quantity" min="1" value="1" required>
                 <input type="text" placeholder="Material" name="material" required>
                 <button type="button" class="btn btn-danger" onclick="removeCut(this)">Remove</button>
             `;
@@ -388,6 +436,127 @@
             }, 5000);
         }
 
+        // Edit cutlist function
+        async function editCutlist(txtFilename) {
+            try {
+                console.log('Loading cutlist for editing:', txtFilename);
+                
+                const response = await fetch(`/api/cutlist/txt/${txtFilename}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load cutlist');
+                }
+                
+                const cutlistData = await response.json();
+                console.log('Loaded cutlist data:', cutlistData);
+                
+                // Store the filename we're editing
+                currentEditingTxtFile = txtFilename;
+                
+                // Switch to the create tab
+                showTab('create');
+                
+                // Clear existing form
+                clearForm();
+                
+                // Populate the form
+                document.getElementById('project-name').value = cutlistData.project_name || '';
+                
+                // Add all cuts
+                cutlistData.cuts.forEach(cut => {
+                    addCutWithData(cut.description, cut.length, cut.quantity, cut.material);
+                });
+                
+                // Remove the initial empty cut if we added cuts
+                if (cutlistData.cuts.length > 0) {
+                    const container = document.getElementById('cuts-container');
+                    const firstCut = container.firstElementChild;
+                    if (firstCut.querySelector('input[name="description"]').value === '') {
+                        firstCut.remove();
+                    }
+                }
+                
+                // Enter edit mode
+                enterEditMode(txtFilename);
+                
+                showMessage(`Loaded "${cutlistData.project_name}" for editing`, 'success');
+                
+            } catch (error) {
+                console.error('Error loading cutlist:', error);
+                showMessage('Failed to load cutlist for editing', 'error');
+            }
+        }
+
+        // Add cut with data
+        function addCutWithData(description, length, quantity, material) {
+            const container = document.getElementById('cuts-container');
+            const newCut = document.createElement('div');
+            newCut.className = 'cut-item';
+            newCut.innerHTML = `
+                <input type="text" placeholder="Description" name="description" value="${description}" required>
+                <input type="number" placeholder="Length" name="length" step="0.01" value="${length}" required>
+                <input type="number" placeholder="Qty" name="quantity" min="1" value="${quantity}" required>
+                <input type="text" placeholder="Material" name="material" value="${material}" required>
+                <button type="button" class="btn btn-danger" onclick="removeCut(this)">Remove</button>
+            `;
+            container.appendChild(newCut);
+        }
+
+        // Enter edit mode
+        function enterEditMode(txtFilename) {
+            // Show edit indicator
+            const indicator = document.getElementById('edit-indicator');
+            indicator.innerHTML = `<strong>Editing:</strong> ${txtFilename}`;
+            indicator.style.display = 'block';
+            
+            // Change submit button
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.textContent = `Update ${txtFilename}`;
+            submitBtn.classList.remove('btn-primary');
+            submitBtn.classList.add('btn-warning');
+            
+            // Show cancel button
+            const cancelBtn = document.getElementById('cancel-btn');
+            cancelBtn.style.display = 'inline-block';
+        }
+
+        // Exit edit mode
+        function exitEditMode() {
+            currentEditingTxtFile = null;
+            
+            // Hide edit indicator
+            document.getElementById('edit-indicator').style.display = 'none';
+            
+            // Reset submit button
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.textContent = 'Send Cutlist';
+            submitBtn.classList.remove('btn-warning');
+            submitBtn.classList.add('btn-primary');
+            
+            // Hide cancel button
+            document.getElementById('cancel-btn').style.display = 'none';
+            
+            // Clear form
+            clearForm();
+            
+            showMessage('Edit cancelled', 'info');
+        }
+
+        // Clear form
+        function clearForm() {
+            document.getElementById('project-name').value = '';
+            document.getElementById('customer-name').value = '';
+            const container = document.getElementById('cuts-container');
+            container.innerHTML = `
+                <div class="cut-item">
+                    <input type="text" placeholder="Description" name="description" required>
+                    <input type="number" placeholder="Length" name="length" step="0.01" required>
+                    <input type="number" placeholder="Qty" name="quantity" min="1" value="1" required>
+                    <input type="text" placeholder="Material" name="material" required>
+                    <button type="button" class="btn btn-danger" onclick="removeCut(this)">Remove</button>
+                </div>
+            `;
+        }
+
         // Handle form submission
         document.getElementById('cutlist-form').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -398,13 +567,20 @@
             const cuts = [];
             cutItems.forEach(item => {
                 const inputs = item.querySelectorAll('input');
-                cuts.push({
-                    description: inputs[0].value,
-                    length: parseFloat(inputs[1].value),
-                    quantity: parseInt(inputs[2].value),
-                    material: inputs[3].value
-                });
+                if (inputs[0].value.trim() && inputs[1].value && inputs[3].value.trim()) {
+                    cuts.push({
+                        description: inputs[0].value.trim(),
+                        length: parseFloat(inputs[1].value),
+                        quantity: parseInt(inputs[2].value) || 1,
+                        material: inputs[3].value.trim()
+                    });
+                }
             });
+
+            if (cuts.length === 0) {
+                showMessage('Please add at least one cut', 'error');
+                return;
+            }
 
             const cutlistData = {
                 project_name: formData.get('project-name'),
@@ -425,19 +601,14 @@
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    showMessage(`Cutlist "${cutlistData.project_name}" sent successfully!`, 'success');
-                    this.reset();
-                    // Reset cuts to just one row
-                    const container = document.getElementById('cuts-container');
-                    container.innerHTML = `
-                        <div class="cut-item">
-                            <input type="text" placeholder="Description" name="description" required>
-                            <input type="number" placeholder="Length" name="length" step="0.01" required>
-                            <input type="number" placeholder="Qty" name="quantity" min="1" required>
-                            <input type="text" placeholder="Material" name="material" required>
-                            <button type="button" class="btn btn-danger" onclick="removeCut(this)">Remove</button>
-                        </div>
-                    `;
+                    if (currentEditingTxtFile) {
+                        showMessage(`Cutlist "${cutlistData.project_name}" updated successfully!`, 'success');
+                        exitEditMode();
+                    } else {
+                        showMessage(`Cutlist "${cutlistData.project_name}" sent successfully!`, 'success');
+                        this.reset();
+                        clearForm();
+                    }
                 } else {
                     showMessage('Error: ' + result.message, 'error');
                 }
@@ -470,9 +641,10 @@
                         <div class="cut-summary">
                             <strong>File:</strong> ${cutlist.filename}
                         </div>
-                        <div style="margin-top: 10px;">
-                            <a href="/download/${cutlist.txt_filename || cutlist.filename.replace('.json', '.txt')}" class="btn btn-primary" style="margin-right: 10px;">Download TXT</a>
-                            <a href="/download/${cutlist.filename}" class="btn btn-secondary">Download JSON</a>
+                        <div class="button-group">
+                            <button class="btn btn-sm btn-warning" onclick="editCutlist('${cutlist.txt_filename || cutlist.filename.replace('.json', '.txt')}')">Edit</button>
+                            <a href="/download/${cutlist.txt_filename || cutlist.filename.replace('.json', '.txt')}" class="btn btn-sm btn-success" download>Download TXT</a>
+                            <a href="/download/${cutlist.filename}" class="btn btn-sm btn-secondary">Download JSON</a>
                         </div>
                     </div>
                 `).join('');

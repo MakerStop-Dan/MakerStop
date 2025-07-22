@@ -6,8 +6,8 @@ import csv
 
 app = Flask(__name__)
 
-# Create directories for storing cutlists and uploads
-os.makedirs('cutlists', exist_ok=True)
+CUTLIST_DIR = '/home/makerstop/Code/cutlists'
+os.makedirs(CUTLIST_DIR, exist_ok=True)
 os.makedirs('static', exist_ok=True)
 os.makedirs('templates', exist_ok=True)
 
@@ -29,7 +29,7 @@ def receive_cutlist():
         
         # JSON filename
         json_filename = f"cutlist_{timestamp}.json"
-        json_filepath = os.path.join('cutlists', json_filename)
+        json_filepath = os.path.join(CUTLIST_DIR, json_filename)
         
         # TXT filename based on project name
         project_name = cutlist_data.get('project_name', 'Unnamed_Project')
@@ -39,7 +39,7 @@ def receive_cutlist():
             clean_project_name = 'Unnamed_Project'
         
         txt_filename = f"{clean_project_name}.txt"
-        txt_filepath = os.path.join('cutlists', txt_filename)
+        txt_filepath = os.path.join(CUTLIST_DIR, txt_filename)
         
         # Add txt filename to data for reference
         cutlist_data['txt_filename'] = txt_filename
@@ -93,13 +93,12 @@ def list_cutlists():
     try:
         cutlist_files = []
         
-        if not os.path.exists('cutlists'):
+        if not os.path.exists(CUTLIST_DIR):
             return jsonify([])
-            
-        for filename in os.listdir('cutlists'):
+        for filename in os.listdir(CUTLIST_DIR):
             if filename.endswith('.json'):
                 try:
-                    filepath = os.path.join('cutlists', filename)
+                    filepath = os.path.join(CUTLIST_DIR, filename)
                     stat = os.stat(filepath)
                     
                     # Load basic info from the file
@@ -143,7 +142,7 @@ def list_cutlists():
 def get_cutlist(filename):
     """Get a specific cutlist file"""
     try:
-        filepath = os.path.join('cutlists', filename)
+        filepath = os.path.join(CUTLIST_DIR, filename)
         if not os.path.exists(filepath):
             return jsonify({'error': 'File not found'}), 404
             
@@ -159,7 +158,7 @@ def get_cutlist(filename):
 def download_cutlist(filename):
     """Download a cutlist file"""
     try:
-        return send_from_directory('cutlists', filename)
+        return send_from_directory(CUTLIST_DIR, filename)
     except Exception as e:
         return jsonify({'error': str(e)}), 404
 
@@ -178,6 +177,68 @@ def status():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
+# Add this route to your existing Flask app (after your other routes)
+
+@app.route('/api/cutlist/txt/<txt_filename>', methods=['GET'])
+def get_cutlist_txt(txt_filename):
+    """Load a txt cutlist file and parse it for editing"""
+    try:
+        txt_filepath = os.path.join(CUTLIST_DIR, txt_filename)
+        if not os.path.exists(txt_filepath):
+            return jsonify({'error': 'TXT file not found'}), 404
+        
+        cuts = []
+        cut_counts = {}  # Track quantities for duplicate cuts
+        
+        with open(txt_filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    # Parse format: "Length : Description - Material"
+                    try:
+                        if ' : ' in line and ' - ' in line:
+                            length_part, rest = line.split(' : ', 1)
+                            description, material = rest.split(' - ', 1)
+                            
+                            length = length_part.strip()
+                            description = description.strip()
+                            material = material.strip()
+                            
+                            # Create a unique key for this cut
+                            cut_key = f"{length}|{description}|{material}"
+                            
+                            if cut_key in cut_counts:
+                                cut_counts[cut_key] += 1
+                            else:
+                                cut_counts[cut_key] = 1
+                                cuts.append({
+                                    'length': length,
+                                    'description': description,
+                                    'material': material,
+                                    'quantity': 1  # Will be updated below
+                                })
+                    except ValueError:
+                        # Skip malformed lines
+                        continue
+        
+        # Update quantities based on counts
+        for cut in cuts:
+            cut_key = f"{cut['length']}|{cut['description']}|{cut['material']}"
+            cut['quantity'] = cut_counts[cut_key]
+        
+        # Extract project name from filename (remove .txt extension)
+        project_name = txt_filename.replace('.txt', '').replace('_', ' ')
+        
+        return jsonify({
+            'project_name': project_name,
+            'cuts': cuts,
+            'txt_filename': txt_filename
+        })
+        
+    except Exception as e:
+        print(f"Error reading txt file: {e}")
+        return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
     print("Starting Cutlist Server...")
