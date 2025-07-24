@@ -5,6 +5,8 @@ Kits will be made available to purchase from www.makerstop.com.au
 
 Contact - info@makerstop.com.au
 
+Instagram - instagram.com/makerstop_
+
 https://www.youtube.com/@MakerStop_au
 
 **MakerStop** is an automatic length stop system designed for Mitre saws, band saws and drill presses used by Makers, metal fabricators, carpenters, and weekend warriors who demand precision without paying commercial-level prices.
